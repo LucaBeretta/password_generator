@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f3ee">
+    <meta name="description" content="Generate and protect passwords privately in your browser.">
+    <title>Pocket Safe — Password generator</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./app.mjs"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <a class="brand" href="./" aria-label="Pocket Safe home">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span>Pocket Safe</span>
+        </a>
+        <p class="privacy"><span class="privacy-dot" aria-hidden="true"></span> Private by design</p>
+      </header>
+
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">YOUR PASSWORD TOOLKIT</p>
+        <h1 id="page-title">A little more<br><span>peace of mind.</span></h1>
+        <p class="intro-copy">Make a strong password. Keep it yours.</p>
+      </section>
+
+      <div class="workspace">
+        <section class="panel generator-panel" aria-labelledby="generator-title">
+          <div class="section-heading">
+            <div class="step-number" aria-hidden="true">01</div>
+            <div>
+              <h2 id="generator-title">Make a password</h2>
+              <p>Just the right mix, made fresh.</p>
+            </div>
+          </div>
+
+          <div class="length-control">
+            <label for="length">Length</label>
+            <div class="length-inputs">
+              <input id="length" name="length" type="range" min="4" max="64" value="20">
+              <output class="length-value" for="length" id="length-value">20</output>
+            </div>
+          </div>
+
+          <fieldset class="categories">
+            <legend>Include characters</legend>
+            <div class="category-list">
+              <label class="category"><input type="checkbox" name="category" value="lowercase" checked><span class="checkmark" aria-hidden="true"></span><span>Lowercase <b>a–z</b></span></label>
+              <label class="category"><input type="checkbox" name="category" value="uppercase" checked><span class="checkmark" aria-hidden="true"></span><span>Uppercase <b>A–Z</b></span></label>
+              <label class="category"><input type="checkbox" name="category" value="digits" checked><span class="checkmark" aria-hidden="true"></span><span>Numbers <b>0–9</b></span></label>
+              <label class="category"><input type="checkbox" name="category" value="symbols"><span class="checkmark" aria-hidden="true"></span><span>Symbols <b>!@#…</b></span></label>
+            </div>
+          </fieldset>
+
+          <button class="button button-primary generate-button" id="generate" type="button">
+            <span class="button-icon" aria-hidden="true">↻</span> Generate password
+          </button>
+
+          <div class="result-wrap">
+            <div class="result-topline">
+              <span class="field-label">Your password</span>
+              <span class="strength"><span aria-hidden="true"></span> Secure randomness</span>
+            </div>
+            <div class="password-result" id="password" role="status" aria-live="polite" aria-label="Generated password">Tap generate to begin</div>
+            <button class="button button-outline copy-button" id="copy-password" type="button" disabled>
+              <span aria-hidden="true">▢</span> Copy password
+            </button>
+          </div>
+          <p class="status-message" id="generator-status" aria-live="polite">Choose a length and the character types you need.</p>
+        </section>
+
+        <section class="panel vault-panel" aria-labelledby="vault-title">
+          <div class="section-heading">
+            <div class="step-number" aria-hidden="true">02</div>
+            <div>
+              <h2 id="vault-title">Lock it away</h2>
+              <p>Encrypt here. Decrypt whenever you need.</p>
+            </div>
+          </div>
+
+          <label class="field-label" for="passphrase">Your passphrase</label>
+          <div class="passphrase-wrap">
+            <input id="passphrase" type="password" autocomplete="off" spellcheck="false" placeholder="Something only you know">
+            <button class="visibility-button" id="toggle-passphrase" type="button" aria-label="Show passphrase" aria-pressed="false">Show</button>
+          </div>
+          <div class="actions">
+            <button class="button button-primary" id="encrypt" type="button">Encrypt password</button>
+            <button class="button button-outline" id="decrypt" type="button">Decrypt to password</button>
+          </div>
+
+          <label class="field-label encrypted-label" for="encrypted">Encrypted password <span>v1 format</span></label>
+          <textarea id="encrypted" rows="3" spellcheck="false" autocomplete="off" placeholder="Your encrypted text will appear here — or paste it in to decrypt"></textarea>
+          <button class="button button-outline copy-encrypted" id="copy-encrypted" type="button">Copy encrypted text</button>
+          <p class="status-message" id="vault-status" aria-live="polite">Use the same passphrase later to unlock it.</p>
+
+          <aside class="security-note" id="security-note">
+            <span class="note-lock" aria-hidden="true"></span>
+            <p><strong>Nothing leaves this page.</strong> Passwords and passphrases are processed only in your browser. Save your passphrase somewhere safe; it cannot be recovered.</p>
+          </aside>
+        </section>
+      </div>
+      <footer><span class="footer-lock" aria-hidden="true">◆</span> Your secrets stay yours <span class="footer-separator">·</span> No accounts, no tracking, no server</footer>
+    </main>
+  </body>
+</html>
