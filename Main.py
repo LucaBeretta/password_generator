@@ -1,4 +1,6 @@
 import base64
+import binascii
+from concurrent.futures import ThreadPoolExecutor
 import secrets
 import string
 import tkinter as tk
@@ -44,6 +46,7 @@ def generate_password(length: int, selected_categories: Sequence[str]) -> str:
         raise ValueError("Select at least one character type.")
     if any(not isinstance(category, str) or not category for category in categories):
         raise ValueError("Character types must be non-empty strings.")
+    categories = tuple(dict.fromkeys(categories))
     if length < len(categories):
         raise ValueError(
             "The password length must be at least the number of selected character types."
@@ -89,15 +92,19 @@ def decrypt_password(encrypted_password: str, passphrase: str) -> str:
     except ValueError as error:
         raise ValueError("The encrypted password format is invalid.") from error
 
-    if version != "v1" or len(salt) != 16:
+    if version != "v1" or len(salt_hex) != 32 or len(salt) != 16:
         raise ValueError("The encrypted password format is invalid.")
 
     try:
+        token_bytes = token.encode("ascii")
+        raw_token = base64.b64decode(token_bytes, altchars=b"-_", validate=True)
+        if len(raw_token) < 73 or raw_token[0] != 0x80 or (len(raw_token) - 57) % 16:
+            raise InvalidToken
         decrypted = _fernet_for_passphrase(passphrase, salt).decrypt(
-            token.encode("ascii")
+            token_bytes
         )
         return decrypted.decode("utf-8")
-    except (InvalidToken, UnicodeDecodeError, UnicodeEncodeError) as error:
+    except (InvalidToken, binascii.Error, UnicodeDecodeError, UnicodeEncodeError) as error:
         raise ValueError(
             "The passphrase is incorrect or the encrypted password is invalid."
         ) from error
@@ -122,6 +129,10 @@ class PasswordGeneratorApp:
         self.root.title("Password Generator")
         self.root.geometry("620x790")
         self.root.minsize(540, 720)
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="password-crypto")
+        self._crypto_future = None
+        self._poll_id = None
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
 
         self.length = tk.IntVar(value=16)
         self.category_vars = {
@@ -291,14 +302,16 @@ class PasswordGeneratorApp:
         ttk.Label(
             generator, text="Password length", style="CardBody.TLabel"
         ).grid(row=2, column=0, sticky="w")
-        ttk.Spinbox(
+        self.length_spinbox = ttk.Spinbox(
             generator,
             from_=MIN_PASSWORD_LENGTH,
             to=MAX_PASSWORD_LENGTH,
             textvariable=self.length,
             width=8,
             justify="center",
-        ).grid(row=2, column=1, sticky="e")
+        )
+        self.length_spinbox.grid(row=2, column=1, sticky="e")
+        self.length_spinbox.bind("<Return>", self._generate_shortcut)
 
         ttk.Label(
             generator, text="Character types", style="CardBody.TLabel"
@@ -326,12 +339,13 @@ class PasswordGeneratorApp:
                 padx=(0, 8),
             )
 
-        ttk.Button(
+        self.generate_button = ttk.Button(
             generator,
             text="Generate password",
             style="Primary.TButton",
             command=self._generate,
-        ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 10))
+        )
+        self.generate_button.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 10))
 
         ttk.Label(
             generator, text="Your password", style="CardBody.TLabel"
@@ -393,18 +407,20 @@ class PasswordGeneratorApp:
         self.passphrase_entry.grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8)
         )
-        ttk.Button(
+        self.encrypt_button = ttk.Button(
             encryption,
             text="Encrypt password",
             style="Primary.TButton",
             command=self._encrypt,
-        ).grid(row=4, column=0, sticky="ew", padx=(0, 4))
-        ttk.Button(
+        )
+        self.encrypt_button.grid(row=4, column=0, sticky="ew", padx=(0, 4))
+        self.decrypt_button = ttk.Button(
             encryption,
             text="Decrypt to password",
             style="Secondary.TButton",
             command=self._decrypt,
-        ).grid(row=4, column=1, sticky="ew", padx=(4, 0))
+        )
+        self.decrypt_button.grid(row=4, column=1, sticky="ew", padx=(4, 0))
 
         ttk.Label(
             encryption, text="Encrypted password", style="CardBody.TLabel"
@@ -429,12 +445,13 @@ class PasswordGeneratorApp:
         self.encrypted_text.grid(
             row=6, column=0, columnspan=2, sticky="ew"
         )
-        ttk.Button(
+        self.copy_encrypted_button = ttk.Button(
             encryption,
             text="Copy encrypted password",
             style="Secondary.TButton",
             command=self._copy_encrypted,
-        ).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        )
+        self.copy_encrypted_button.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.encryption_status = ttk.Label(
             encryption,
             textvariable=self.encryption_notice,
@@ -451,7 +468,61 @@ class PasswordGeneratorApp:
             style="Footer.TLabel",
         ).grid(row=5, column=0, sticky="w", pady=(8, 0))
 
-        self.root.bind("<Return>", lambda _event: self._generate())
+        self.root.bind("<Control-Return>", self._generate_shortcut)
+
+    def _generate_shortcut(self, _event=None):
+        self._generate()
+        return "break"
+
+    def _close(self):
+        if self._poll_id is not None:
+            self.root.after_cancel(self._poll_id)
+            self._poll_id = None
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        self.root.destroy()
+
+    def _set_crypto_busy(self, busy):
+        state = "disabled" if busy else "normal"
+        for widget in (self.generate_button, self.encrypt_button, self.decrypt_button,
+                       self.copy_encrypted_button, self.passphrase_entry):
+            widget.configure(state=state)
+        self.encrypted_text.configure(state=state)
+
+    def _start_crypto(self, operation, value, passphrase):
+        if self._crypto_future is not None:
+            return
+        if not passphrase:
+            self._set_notice(self.encryption_status, self.encryption_notice, "Enter a passphrase first.", "error")
+            return
+        self._set_crypto_busy(True)
+        self._set_notice(self.encryption_status, self.encryption_notice, "Encrypting…" if operation == "encrypt" else "Decrypting…")
+        function = encrypt_password if operation == "encrypt" else decrypt_password
+        # Workers receive plain strings; only the Tk thread touches widgets.
+        self._crypto_future = self._executor.submit(function, value, passphrase)
+        self._poll_id = self.root.after(15, self._poll_crypto, operation)
+
+    def _poll_crypto(self, operation):
+        self._poll_id = None
+        if not self._crypto_future.done():
+            self._poll_id = self.root.after(15, self._poll_crypto, operation)
+            return
+        future, self._crypto_future = self._crypto_future, None
+        self._set_crypto_busy(False)
+        try:
+            result = future.result()
+        except Exception as error:
+            message = str(error) if isinstance(error, ValueError) else "Could not complete the operation. Try again."
+            self._set_notice(self.encryption_status, self.encryption_notice, message, "error")
+            return
+        if operation == "encrypt":
+            self.encrypted_text.delete("1.0", "end")
+            self.encrypted_text.insert("1.0", result)
+            message = "Password encrypted. Keep the passphrase to decrypt it later."
+        else:
+            self.password.set(result)
+            self._set_notice(self.generator_status, self.generator_notice, "Password decrypted and restored to the password field.", "success")
+            message = "Password decrypted successfully."
+        self._set_notice(self.encryption_status, self.encryption_notice, message, "success")
 
     def _set_notice(
         self,
@@ -469,6 +540,8 @@ class PasswordGeneratorApp:
         label.configure(style=style)
 
     def _generate(self) -> None:
+        if self._crypto_future is not None:
+            return
         try:
             length = self.length.get()
             selected = [
@@ -479,6 +552,7 @@ class PasswordGeneratorApp:
             self.password.set(generate_password(length, selected))
         except (tk.TclError, ValueError) as error:
             self.password.set("")
+            self.encrypted_text.delete("1.0", "end")
             self._set_notice(
                 self.generator_status,
                 self.generator_notice,
@@ -572,50 +646,11 @@ class PasswordGeneratorApp:
                 "error",
             )
             return
-        try:
-            encrypted = encrypt_password(password, self.passphrase.get())
-        except ValueError as error:
-            self._set_notice(
-                self.encryption_status,
-                self.encryption_notice,
-                str(error),
-                "error",
-            )
-            return
-
-        self.encrypted_text.delete("1.0", "end")
-        self.encrypted_text.insert("1.0", encrypted)
-        self._set_notice(
-            self.encryption_status,
-            self.encryption_notice,
-            "Password encrypted. Keep the passphrase to decrypt it later.",
-            "success",
-        )
+        self._start_crypto("encrypt", password, self.passphrase.get())
 
     def _decrypt(self) -> None:
         encrypted = self.encrypted_text.get("1.0", "end").strip()
-        try:
-            self.password.set(decrypt_password(encrypted, self.passphrase.get()))
-        except ValueError as error:
-            self._set_notice(
-                self.encryption_status,
-                self.encryption_notice,
-                str(error),
-                "error",
-            )
-            return
-        self._set_notice(
-            self.generator_status,
-            self.generator_notice,
-            "Password decrypted and restored to the password field.",
-            "success",
-        )
-        self._set_notice(
-            self.encryption_status,
-            self.encryption_notice,
-            "Password decrypted successfully.",
-            "success",
-        )
+        self._start_crypto("decrypt", encrypted, self.passphrase.get())
 
 
 def main() -> None:

@@ -1,4 +1,9 @@
 import unittest
+import json
+from pathlib import Path
+import shutil
+import subprocess
+from unittest.mock import patch
 
 from Main import (
     CATEGORIES,
@@ -52,3 +57,29 @@ class GeneratePasswordTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "encrypted password is invalid"):
             decrypt_password(encrypted, passphrase)
+
+    def test_duplicate_categories_do_not_require_extra_length(self):
+        self.assertIn(generate_password(1, ["abc", "abc"]), "abc")
+
+    def test_malformed_tokens_are_rejected_before_expensive_key_derivation(self):
+        with patch("Main._fernet_for_passphrase") as derive:
+            for token in ("!", "", "gA==", "non-ascii-\u00e9"):
+                with self.subTest(token=token), self.assertRaises(ValueError):
+                    decrypt_password(f"v1${'00' * 16}${token}", "passphrase")
+            derive.assert_not_called()
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed for browser interoperability checks")
+    def test_browser_and_desktop_ciphertexts_are_compatible(self):
+        bridge = Path(__file__).resolve().parent / "scripts" / "crypto_bridge.mjs"
+        for password in ("P@ssword-123", "\u00e9\U0001f510\u6f22\u5b57", "a" * 128):
+            with self.subTest(length=len(password)):
+                passphrase = "interoperability \u00e9 test"
+                encrypted = encrypt_password(password, passphrase)
+                result = subprocess.run(
+                    ["node", str(bridge)],
+                    input=json.dumps({"password": password, "encrypted": encrypted, "passphrase": passphrase}),
+                    capture_output=True, text=True, encoding="utf-8", check=True,
+                )
+                data = json.loads(result.stdout)
+                self.assertEqual(data["decrypted"], password)
+                self.assertEqual(decrypt_password(data["encrypted"], passphrase), password)

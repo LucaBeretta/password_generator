@@ -17,16 +17,25 @@ function randomBytes(length) {
   return bytes;
 }
 
-function randomIndex(max) {
-  const limit = Math.floor(256 / max) * max;
-  let value;
-  do {
-    value = randomBytes(1)[0];
-  } while (value >= limit);
-  return value % max;
+function createRandomIndex() {
+  // Keep the pool local to one password; rejection sampling avoids modulo bias.
+  let bytes = randomBytes(256);
+  let offset = 0;
+  return (max) => {
+    const limit = Math.floor(256 / max) * max;
+    let value;
+    do {
+      if (offset === bytes.length) {
+        bytes = randomBytes(256);
+        offset = 0;
+      }
+      value = bytes[offset++];
+    } while (value >= limit);
+    return value % max;
+  };
 }
 
-function secureShuffle(values) {
+function secureShuffle(values, randomIndex) {
   for (let i = values.length - 1; i > 0; i -= 1) {
     const j = randomIndex(i + 1);
     [values[i], values[j]] = [values[j], values[i]];
@@ -35,7 +44,12 @@ function secureShuffle(values) {
 }
 
 export function generatePassword(length, selectedCategories) {
-  const categories = [...new Set(selectedCategories)].map((name) => CATEGORY_CHARS[name]);
+  if (!Array.isArray(selectedCategories)) {
+    throw new Error("Select at least one valid character type.");
+  }
+  const categories = [...new Set(selectedCategories)].map((name) => (
+    typeof name === "string" && Object.hasOwn(CATEGORY_CHARS, name) ? CATEGORY_CHARS[name] : undefined
+  ));
   if (!categories.length || categories.some((characters) => !characters)) {
     throw new Error("Select at least one valid character type.");
   }
@@ -43,11 +57,12 @@ export function generatePassword(length, selectedCategories) {
     throw new Error(`Choose a length from ${categories.length} to 128 characters.`);
   }
   const allCharacters = categories.join("");
+  const randomIndex = createRandomIndex();
   const password = categories.map((characters) => characters[randomIndex(characters.length)]);
   while (password.length < length) {
     password.push(allCharacters[randomIndex(allCharacters.length)]);
   }
-  return secureShuffle(password).join("");
+  return secureShuffle(password, randomIndex).join("");
 }
 
 function bytesToBase64Url(bytes) {
@@ -154,7 +169,7 @@ function setStatus(element, message, kind = "") {
   else delete element.dataset.kind;
 }
 
-async function copyText(value) {
+export async function copyText(value) {
   if (!value) throw new Error("There is nothing to copy yet.");
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -165,11 +180,17 @@ async function copyText(value) {
   helper.setAttribute("readonly", "");
   helper.style.position = "fixed";
   helper.style.opacity = "0";
-  document.body.append(helper);
-  helper.select();
-  const copied = document.execCommand("copy");
-  helper.remove();
-  if (!copied) throw new Error("Clipboard access is unavailable. Select and copy the text instead.");
+  const previousFocus = document.activeElement;
+  try {
+    document.body.append(helper);
+    helper.select();
+    if (!document.execCommand("copy")) {
+      throw new Error("Clipboard access is unavailable. Select and copy the text instead.");
+    }
+  } finally {
+    helper.remove();
+    previousFocus?.focus({ preventScroll: true });
+  }
 }
 
 if (typeof document !== "undefined") {
@@ -179,6 +200,44 @@ if (typeof document !== "undefined") {
   const lengthValue = $("#length-value");
   const generatorStatus = $("#generator-status");
   const vaultStatus = $("#vault-status");
+  const encryptedInput = $("#encrypted");
+  const passphraseInput = $("#passphrase");
+  const encryptButton = $("#encrypt");
+  const decryptButton = $("#decrypt");
+  const copyPasswordButton = $("#copy-password");
+  const copyEncryptedButton = $("#copy-encrypted");
+  const vaultPanel = $(".vault-panel");
+  const cryptoControls = [...document.querySelectorAll(".workspace button, .workspace input, .workspace textarea")];
+  let currentPassword = "";
+  let cryptoBusy = false;
+
+  function showPassword(password) {
+    currentPassword = password;
+    passwordOutput.textContent = password || "Tap generate to begin";
+    copyPasswordButton.disabled = cryptoBusy || !password;
+  }
+
+  async function runCrypto(operation, button, busyLabel) {
+    if (cryptoBusy) return;
+    cryptoBusy = true;
+    const previousStates = cryptoControls.map((control) => control.disabled);
+    const previousLabel = button.textContent;
+    for (const control of cryptoControls) control.disabled = true;
+    button.textContent = busyLabel;
+    vaultPanel.setAttribute("aria-busy", "true");
+    setStatus(vaultStatus, busyLabel);
+    try {
+      await operation();
+    } catch (error) {
+      setStatus(vaultStatus, error.message, "error");
+    } finally {
+      cryptoControls.forEach((control, index) => { control.disabled = previousStates[index]; });
+      copyPasswordButton.disabled = !currentPassword;
+      button.textContent = previousLabel;
+      vaultPanel.removeAttribute("aria-busy");
+      cryptoBusy = false;
+    }
+  }
 
   function updateLength() {
     lengthValue.value = lengthInput.value;
@@ -191,22 +250,23 @@ if (typeof document !== "undefined") {
   lengthInput.addEventListener("input", updateLength);
 
   $("#generate").addEventListener("click", () => {
+    if (cryptoBusy) return;
+    encryptedInput.value = "";
     const checked = [...document.querySelectorAll('input[name="category"]:checked')].map((input) => input.value);
     try {
-      passwordOutput.textContent = generatePassword(Number(lengthInput.value), checked);
-      $("#copy-password").disabled = false;
+      showPassword(generatePassword(Number(lengthInput.value), checked));
       setStatus(generatorStatus, "Password ready. It was generated on this device.", "success");
       setStatus(vaultStatus, "A new password is ready to encrypt.");
     } catch (error) {
-      passwordOutput.textContent = "Tap generate to begin";
-      $("#copy-password").disabled = true;
+      showPassword("");
       setStatus(generatorStatus, error.message, "error");
+      setStatus(vaultStatus, "Generate a password before encrypting.");
     }
   });
 
-  $("#copy-password").addEventListener("click", async () => {
+  copyPasswordButton.addEventListener("click", async () => {
     try {
-      await copyText(passwordOutput.textContent);
+      await copyText(currentPassword);
       setStatus(generatorStatus, "Password copied to the clipboard.", "success");
     } catch (error) {
       setStatus(generatorStatus, error.message, "error");
@@ -214,7 +274,7 @@ if (typeof document !== "undefined") {
   });
 
   $("#toggle-passphrase").addEventListener("click", (event) => {
-    const passphrase = $("#passphrase");
+    const passphrase = passphraseInput;
     const visible = passphrase.type === "password";
     passphrase.type = visible ? "text" : "password";
     event.currentTarget.textContent = visible ? "Hide" : "Show";
@@ -222,30 +282,21 @@ if (typeof document !== "undefined") {
     event.currentTarget.setAttribute("aria-pressed", String(visible));
   });
 
-  $("#encrypt").addEventListener("click", async () => {
-    try {
-      $("#encrypted").value = await encryptPassword(passwordOutput.textContent === "Tap generate to begin" ? "" : passwordOutput.textContent, $("#passphrase").value);
+  encryptButton.addEventListener("click", () => runCrypto(async () => {
+      encryptedInput.value = await encryptPassword(currentPassword, passphraseInput.value);
       setStatus(vaultStatus, "Password encrypted. Keep the passphrase to decrypt it later.", "success");
-    } catch (error) {
-      setStatus(vaultStatus, error.message, "error");
-    }
-  });
+  }, encryptButton, "Encrypting password…"));
 
-  $("#decrypt").addEventListener("click", async () => {
-    try {
-      const password = await decryptPassword($("#encrypted").value, $("#passphrase").value);
-      passwordOutput.textContent = password;
-      $("#copy-password").disabled = false;
+  decryptButton.addEventListener("click", () => runCrypto(async () => {
+      const password = await decryptPassword(encryptedInput.value, passphraseInput.value);
+      showPassword(password);
       setStatus(generatorStatus, "Password decrypted and restored above.", "success");
       setStatus(vaultStatus, "Password decrypted successfully.", "success");
-    } catch (error) {
-      setStatus(vaultStatus, error.message, "error");
-    }
-  });
+  }, decryptButton, "Decrypting password…"));
 
-  $("#copy-encrypted").addEventListener("click", async () => {
+  copyEncryptedButton.addEventListener("click", async () => {
     try {
-      await copyText($("#encrypted").value.trim());
+      await copyText(encryptedInput.value.trim());
       setStatus(vaultStatus, "Encrypted text copied to the clipboard.", "success");
     } catch (error) {
       setStatus(vaultStatus, error.message, "error");
@@ -253,6 +304,8 @@ if (typeof document !== "undefined") {
   });
 
   if (!globalThis.isSecureContext || !globalThis.crypto?.subtle) {
+    encryptButton.disabled = true;
+    decryptButton.disabled = true;
     const note = $("#security-note");
     const warning = document.createElement("p");
     warning.className = "security-warning";

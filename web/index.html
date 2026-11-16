@@ -8,6 +8,7 @@
     <title>Pocket Safe — Password generator</title>
     <link rel="stylesheet" href="./styles.css">
     <script type="module" src="./app.mjs"></script>
+    <script type="module" src="./feedback.mjs"></script>
   </head>
   <body>
     <main class="shell">
@@ -38,7 +39,7 @@
           <div class="length-control">
             <label for="length">Length</label>
             <div class="length-inputs">
-              <input id="length" name="length" type="range" min="4" max="64" value="20">
+              <input id="length" name="length" type="range" min="4" max="128" value="20">
               <output class="length-value" for="length" id="length-value">20</output>
             </div>
           </div>
@@ -96,11 +97,47 @@
 
           <aside class="security-note" id="security-note">
             <span class="note-lock" aria-hidden="true"></span>
-            <p><strong>Nothing leaves this page.</strong> Passwords and passphrases are processed only in your browser. Save your passphrase somewhere safe; it cannot be recovered.</p>
+            <p><strong>Your passwords stay on this device.</strong> Passwords and passphrases are processed only in your browser. Save your passphrase somewhere safe; it cannot be recovered.</p>
           </aside>
         </section>
       </div>
-      <footer><span class="footer-lock" aria-hidden="true">◆</span> Your secrets stay yours <span class="footer-separator">·</span> No accounts, no tracking, no server</footer>
+      <section class="panel feedback-panel" aria-labelledby="feedback-title">
+        <div class="section-heading">
+          <div class="step-number" aria-hidden="true">03</div>
+          <div><h2 id="feedback-title">Help make it better</h2><p>A small suggestion can make a big difference.</p></div>
+        </div>
+        <div class="feedback-layout">
+          <form id="feedback-form" aria-describedby="feedback-privacy">
+            <fieldset class="feedback-rating">
+              <legend>How was your experience?</legend>
+              <div class="rating-options">
+                <label><input type="radio" name="rating" value="1" required><span>1</span></label>
+                <label><input type="radio" name="rating" value="2"><span>2</span></label>
+                <label><input type="radio" name="rating" value="3"><span>3</span></label>
+                <label><input type="radio" name="rating" value="4"><span>4</span></label>
+                <label><input type="radio" name="rating" value="5"><span>5</span></label>
+              </div>
+              <div class="rating-scale"><span>1: Needs work</span><span>5: Excellent</span></div>
+            </fieldset>
+            <label class="field-label" for="feedback-topic">What is your feedback about?</label>
+            <select id="feedback-topic" name="topic"><option value="general">Overall experience</option><option value="generator">Password generator</option><option value="encryption">Encryption and decryption</option></select>
+            <label class="field-label" for="feedback-comment">Your suggestion <span class="optional-label">(optional)</span></label>
+            <textarea id="feedback-comment" name="comment" maxlength="2000" rows="3" placeholder="What worked well? What could we improve?" aria-describedby="feedback-privacy"></textarea>
+            <p class="feedback-privacy" id="feedback-privacy">Submitting sends your rating, topic, and optional comment to our shared feedback database. Never include passwords or passphrases. No password data is collected automatically.</p>
+            <button class="button button-primary" id="feedback-submit" type="submit">Send feedback</button>
+            <p class="status-message" id="feedback-status" role="status" aria-live="polite"></p>
+          </form>
+          <aside class="feedback-summary" aria-labelledby="feedback-summary-title">
+            <div class="summary-heading"><h3 id="feedback-summary-title">Community feedback</h3><button class="feedback-refresh" id="feedback-refresh" type="button">Refresh</button></div>
+            <p class="feedback-score"><strong id="feedback-average">—</strong><span>out of 5</span></p>
+            <p class="feedback-count" id="feedback-count">Loading feedback…</p>
+            <div class="rating-distribution" id="rating-distribution" aria-label="Rating distribution"></div>
+            <p class="status-message" id="feedback-stats-status" role="status" aria-live="polite"></p>
+            <p class="feedback-summary-note">Ratings reflect submitted feedback, not a measure of password security. Comments are not displayed publicly.</p>
+          </aside>
+        </div>
+      </section>
+      <footer><span class="footer-lock" aria-hidden="true">◆</span> Your secrets stay yours <span class="footer-separator">·</span> Feedback is shared only when you submit it</footer>
     </main>
   </body>
 </html>

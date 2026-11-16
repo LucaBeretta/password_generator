@@ -1,5 +1,4 @@
 import string
-import random
 
 low = string.ascii_lowercase
 num = string.digits
@@ -8,8 +7,8 @@ up = string.ascii_uppercase
 
 catList = [low, num, sym, up]
 
-print(low)
-print(num)
-print(sym)
-
-print(catList)
+if __name__ == "__main__":
+    print(low)
+    print(num)
+    print(sym)
+    print(catList)
